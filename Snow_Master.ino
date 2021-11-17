@@ -79,10 +79,10 @@ void setup() {
 
   // Use this block of code to set time on RTC module
   //tmElements_t tm;
-  //tm.Hour = 21;
-  //tm.Minute = 12;
-  //tm.Second = 30;
-  //tm.Day = 10;
+  //tm.Hour = 18;
+  //tm.Minute = 7;
+  //tm.Second = 00;
+  //tm.Day = 16;
   //tm.Month = 11;
   //tm.Year = 2021 - 1970;
   //RTC.write(tm);
@@ -104,7 +104,7 @@ void setup() {
   RTC.squareWave(SQWAVE_NONE);
 
   //RTC.setAlarm(alarmType, seconds, minutes, hours, dayOrDate);
-  RTC.setAlarm(ALM1_MATCH_HOURS, 0, 0, 3, 0);
+  RTC.setAlarm(ALM1_MATCH_HOURS, 0, 0, 15, 0);
   RTC.alarm(ALARM_1);
 
   getSaveAndSendData();
@@ -113,7 +113,6 @@ void setup() {
 void loop()
 {
   if ( RTC.alarm(ALARM_1) )  {
-    Serial.println("Getting measurements...");
     time_t t = RTC.get();
     int new_alarm_time = (hour(t) + ALRM_TIME_INTERVAL_HR) % 24;
     RTC.setAlarm(ALM1_MATCH_HOURS, 0, 0, new_alarm_time, 0);
@@ -371,7 +370,7 @@ void set_time_from_rock_block() {
     RTC.set(mktime(&t));
   } else if (err == ISBD_NO_NETWORK) {
     // Did it fail because the transceiver has not yet seen the network?
-    Serial.println(F("No network detected.  Waiting 10 seconds."));
+    Serial.println(F("No network detected."));
   } else {
     Serial.print(F("Unexpected error "));
     Serial.println(err);
@@ -431,7 +430,7 @@ void digitalClockDisplay()
   Serial.print(' ');
   Serial.print(month());
   Serial.print(' ');
-  Serial.print(month());
+  Serial.print(day());
   Serial.print(' ');
   Serial.print(year());
   Serial.println();
