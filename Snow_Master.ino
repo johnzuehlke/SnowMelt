@@ -56,10 +56,10 @@ void setup() {
   IridiumSerial.begin(19200);
   // If we're powering the device by USB, tell the library to
   // relax timing constraints waiting for the supercap to recharge.
-  //modem.setPowerProfile(IridiumSBD::USB_POWER_PROFILE);
+  modem.setPowerProfile(IridiumSBD::USB_POWER_PROFILE);
   // For "high current" (battery-powered) applications
-  modem.setPowerProfile(IridiumSBD::DEFAULT_POWER_PROFILE);
-  set_time_from_rock_block();
+  //modem.setPowerProfile(IridiumSBD::DEFAULT_POWER_PROFILE);
+  //set_time_from_rock_block();
 
   SCALE1.begin(9600);
   SCALE1.setTimeout(5000);
@@ -79,10 +79,10 @@ void setup() {
 
   // Use this block of code to set time on RTC module
   //tmElements_t tm;
-  //tm.Hour = 18;
-  //tm.Minute = 7;
-  //tm.Second = 00;
-  //tm.Day = 16;
+  //tm.Hour = 12;
+  //tm.Minute = 10;
+  //tm.Second = 20;
+  //tm.Day = 17;
   //tm.Month = 11;
   //tm.Year = 2021 - 1970;
   //RTC.write(tm);
@@ -93,6 +93,8 @@ void setup() {
     Serial.println("Unable to sync with the RTC");
   else
     Serial.println("RTC has set the system time");
+
+  digitalClockDisplay();
 
   // initialize the alarms to known values, clear the alarm flags, clear the alarm interrupt flags
   RTC.setAlarm(ALM1_MATCH_DATE, 0, 0, 0, 1);
@@ -107,6 +109,13 @@ void setup() {
   RTC.setAlarm(ALM1_MATCH_HOURS, 0, 0, 15, 0);
   RTC.alarm(ALARM_1);
 
+  //First few reading are bad, so purge them
+  for (int i = 0; i < 5; i++) {
+    Serial.println(get_snow_depth(get_temp_celcius()));
+  }
+
+  Serial.println("Setup complete, waiting 30 seconds and then first data will be sent");
+  delay(30000);
   getSaveAndSendData();
 }
 
@@ -117,7 +126,6 @@ void loop()
     int new_alarm_time = (hour(t) + ALRM_TIME_INTERVAL_HR) % 24;
     RTC.setAlarm(ALM1_MATCH_HOURS, 0, 0, new_alarm_time, 0);
     RTC.alarm(ALARM_1);
-
     getSaveAndSendData();
   }
   //digitalClockDisplay();
@@ -367,7 +375,16 @@ void set_time_from_rock_block() {
             t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec);
     Serial.print(F("Iridium time/date is "));
     Serial.println(buf);
-    RTC.set(mktime(&t));
+
+    tmElements_t tm;
+    tm.Hour = t.tm_hour;
+    tm.Minute = t.tm_min;
+    tm.Second = t.tm_sec;
+    tm.Day = t.tm_mday;
+    tm.Month = t.tm_mon + 1;
+    tm.Year = t.tm_year + 1900;
+    RTC.write(tm);
+
   } else if (err == ISBD_NO_NETWORK) {
     // Did it fail because the transceiver has not yet seen the network?
     Serial.println(F("No network detected."));
