@@ -1,3 +1,4 @@
+
 #include <IridiumSBD.h> // http://librarymanager/All#IridiumSBDI2C
 #include <time.h>
 #include <DS3232RTC.h> // https://github.com/JChristensen/DS3232RTC
@@ -14,6 +15,7 @@
 #define UECHO_PIN 12
 #define CS_SD_CARD_PIN 53
 #define IridiumSerial Serial1
+#define SLEEP_PIN 31
 #define DIAGNOSTICS false // Set to true to see diagnostics
 
 #define SCALE1 Serial2
@@ -26,13 +28,13 @@
 #define MODE_SEND HIGH
 #define MODE_RECV LOW
 
-IridiumSBD modem(IridiumSerial);
+IridiumSBD modem(IridiumSerial, SLEEP_PIN);
 OneWire oneWire(TEMP_PIN);
 DallasTemperature temp_sensor(&oneWire);
 
+const int ALARM_INTERVAL_HRS = 12;
 const float BAD_VAL = -99.99;
-const int ALRM_TIME_INTERVAL_HR = 12;
-const long DEPTH_OFFSET = 0; //Initial depth with no snow
+const long DEPTH_OFFSET = 105; //Initial depth with no snow
 
 struct LogData {
   char time[21]; //time of measurements
@@ -56,10 +58,12 @@ void setup() {
   IridiumSerial.begin(19200);
   // If we're powering the device by USB, tell the library to
   // relax timing constraints waiting for the supercap to recharge.
-  modem.setPowerProfile(IridiumSBD::USB_POWER_PROFILE);
+  //modem.setPowerProfile(IridiumSBD::USB_POWER_PROFILE);
   // For "high current" (battery-powered) applications
-  //modem.setPowerProfile(IridiumSBD::DEFAULT_POWER_PROFILE);
-  //set_time_from_rock_block();
+  modem.setPowerProfile(IridiumSBD::DEFAULT_POWER_PROFILE);
+  modem.adjustSendReceiveTimeout(600); //Try to send msg for 10 mins
+
+  //test_basic_rock_block_wiring();
 
   SCALE1.begin(9600);
   SCALE1.setTimeout(5000);
@@ -86,14 +90,7 @@ void setup() {
   //tm.Month = 11;
   //tm.Year = 2021 - 1970;
   //RTC.write(tm);
-
-  // initialize the alarms to known values, clear the alarm flags, clear the alarm interrupt flags
-  setSyncProvider(RTC.get);   // the function to get the time from the RTC
-  if (timeStatus() != timeSet)
-    Serial.println("Unable to sync with the RTC");
-  else
-    Serial.println("RTC has set the system time");
-
+  Serial.println("RTC time is: ");
   digitalClockDisplay();
 
   // initialize the alarms to known values, clear the alarm flags, clear the alarm interrupt flags
@@ -105,8 +102,8 @@ void setup() {
   RTC.alarmInterrupt(ALARM_2, false);
   RTC.squareWave(SQWAVE_NONE);
 
-  //RTC.setAlarm(alarmType, seconds, minutes, hours, dayOrDate);
-  RTC.setAlarm(ALM1_MATCH_HOURS, 0, 0, 15, 0);
+  //RTC.setAlarm(alarmType, minutes, hours, dayOrDate);
+  RTC.setAlarm(ALM1_MATCH_HOURS, 0, 13, 0);
   RTC.alarm(ALARM_1);
 
   //First few reading are bad, so purge them
@@ -119,16 +116,17 @@ void setup() {
   getSaveAndSendData();
 }
 
-void loop()
-{
+void loop() {
   if ( RTC.alarm(ALARM_1) )  {
     time_t t = RTC.get();
-    int new_alarm_time = (hour(t) + ALRM_TIME_INTERVAL_HR) % 24;
-    RTC.setAlarm(ALM1_MATCH_HOURS, 0, 0, new_alarm_time, 0);
+    digitalClockDisplay();
+    int new_alarm_time_hr = (hour(t) + ALARM_INTERVAL_HRS) % 24;
+    Serial.print("Setting alarm to hour");
+    Serial.println(new_alarm_time_hr);
+    RTC.setAlarm(ALM1_MATCH_HOURS, 0, new_alarm_time_hr, 0);
     RTC.alarm(ALARM_1);
     getSaveAndSendData();
   }
-  //digitalClockDisplay();
   delay(1000);
 }
 
@@ -353,62 +351,61 @@ bool write_data_to_log_file() {
   }
 }
 
-void set_time_from_rock_block() {
+void test_basic_rock_block_wiring() {
 
   // Begin satellite modem operation
-  Serial.println("Starting modem...");
+  Serial.println(F("Starting modem..."));
   int err = modem.begin();
-  if (err != ISBD_SUCCESS) {
-    Serial.print("Begin failed: error ");
+  if (err != ISBD_SUCCESS)
+  {
+    Serial.print(F("Begin failed: error "));
     Serial.println(err);
     if (err == ISBD_NO_MODEM_DETECTED)
-      Serial.println("No modem detected: check wiring.");
-    modem.sleep();
+      Serial.println(F("No modem detected: check wiring."));
     return;
   }
 
-  struct tm t;
-  err = modem.getSystemTime(t);
-  if (err == ISBD_SUCCESS) {
-    char buf[32];
-    sprintf(buf, "%d-%02d-%02d %02d:%02d:%02d",
-            t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec);
-    Serial.print(F("Iridium time/date is "));
-    Serial.println(buf);
-
-    tmElements_t tm;
-    tm.Hour = t.tm_hour;
-    tm.Minute = t.tm_min;
-    tm.Second = t.tm_sec;
-    tm.Day = t.tm_mday;
-    tm.Month = t.tm_mon + 1;
-    tm.Year = t.tm_year + 1900;
-    RTC.write(tm);
-
-  } else if (err == ISBD_NO_NETWORK) {
-    // Did it fail because the transceiver has not yet seen the network?
-    Serial.println(F("No network detected."));
-  } else {
-    Serial.print(F("Unexpected error "));
+  // Example: Print the firmware revision
+  char version[12];
+  err = modem.getFirmwareVersion(version, sizeof(version));
+  if (err != ISBD_SUCCESS)
+  {
+    Serial.print(F("FirmwareVersion failed: error "));
     Serial.println(err);
+    return;
   }
-  modem.sleep();
-  return;
+  Serial.print(F("Firmware Version is "));
+  Serial.print(version);
+  Serial.println(F("."));
 
+  // Put modem to sleep
+  Serial.println(F("Putting modem to sleep."));
+  err = modem.sleep();
+  if (err != ISBD_SUCCESS) {
+    Serial.print(F("sleep failed: error "));
+    Serial.println(err);
+  } else {
+    Serial.println(F("Successfully put RockBlock to sleep."));
+  }
 }
 
 void send_data_to_rock_block() {
 
+  int err = 0;
   // Begin satellite modem operation
   Serial.println("Starting modem...");
-  int err = modem.begin();
-  if (err != ISBD_SUCCESS) {
-    Serial.print("Begin failed: error ");
-    Serial.println(err);
-    if (err == ISBD_NO_MODEM_DETECTED)
-      Serial.println("No modem detected: check wiring.");
-    modem.sleep();
-    return;
+  if (modem.isAsleep()) {
+    int err = modem.begin();
+    if (err != ISBD_SUCCESS) {
+      Serial.print("Begin failed: error ");
+      Serial.println(err);
+      if (err == ISBD_NO_MODEM_DETECTED)
+        Serial.println("No modem detected: check wiring.");
+      modem.sleep();
+      return;
+    }
+  } else {
+    Serial.println("Modem was not in sleep mode.");
   }
 
   char buffer[128];
@@ -424,7 +421,24 @@ void send_data_to_rock_block() {
   } else {
     Serial.println("Data sent!");
   }
-  modem.sleep();
+
+  // Clear the Mobile Originated message buffer
+  Serial.println(F("Clearing the MO buffer."));
+  err = modem.clearBuffers(ISBD_CLEAR_MO); // Clear MO buffer
+  if (err != ISBD_SUCCESS) {
+    Serial.print(F("clearBuffers failed: error "));
+    Serial.println(err);
+  }
+
+  // Put modem to sleep
+  Serial.println(F("Putting modem to sleep."));
+  err = modem.sleep();
+  if (err != ISBD_SUCCESS) {
+    Serial.print(F("sleep failed: error "));
+    Serial.println(err);
+  } else {
+    Serial.println(F("Successfully put RockBlock to sleep."));
+  }
   return;
 }
 
@@ -438,23 +452,22 @@ void ISBDDiagsCallback(IridiumSBD * device, char c) {
 }
 #endif
 
-void digitalClockDisplay()
-{
+void digitalClockDisplay() {
+  time_t t = RTC.get();
   // digital clock display of the time
-  Serial.print(hour());
-  printDigits(minute());
-  printDigits(second());
+  Serial.print(hour(t));
+  printDigits(minute(t));
+  printDigits(second(t));
   Serial.print(' ');
-  Serial.print(month());
+  Serial.print(month(t));
   Serial.print(' ');
-  Serial.print(day());
+  Serial.print(day(t));
   Serial.print(' ');
-  Serial.print(year());
+  Serial.print(year(t));
   Serial.println();
 }
 
-void printDigits(int digits)
-{
+void printDigits(int digits) {
   // utility function for digital clock display: prints preceding colon and leading 0
   Serial.print(':');
   if (digits < 10)
